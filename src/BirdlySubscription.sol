@@ -14,6 +14,8 @@ contract BirdlySubscription {
     error ContractPaused();
     error ContractNotPaused();
     error NoFundsToWithdraw();
+    error SubscriptionAlreadyActive();
+    error NoActiveSubscription();
 
     struct Plan {
         uint256 id;
@@ -67,6 +69,7 @@ contract BirdlySubscription {
         uint256 multimodalExpiresAt
     );
 
+    event SubscriptionCancelled(address indexed user);
     event FundsWithdrawn(address indexed to, uint256 amount);
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
     event Paused(address account);
@@ -175,23 +178,20 @@ contract BirdlySubscription {
     {
         if (recipient == address(0)) revert InvalidRecipient();
         if (planId == 0 || planId > planCount) revert PlanNotFound();
+        if (historyExpiration[recipient] > block.timestamp || multimodalExpiration[recipient] > block.timestamp) {
+            revert SubscriptionAlreadyActive();
+        }
 
         Plan storage plan = plans[planId];
         if (!plan.active) revert PlanInactive();
         if (msg.value < plan.price) revert InsufficientPayment(plan.price, msg.value);
 
         if (plan.unlocksHistory) {
-            uint256 currentHist = historyExpiration[recipient];
-            historyExpiration[recipient] = currentHist > block.timestamp
-                ? currentHist + plan.duration
-                : block.timestamp + plan.duration;
+            historyExpiration[recipient] = block.timestamp + plan.duration;
         }
 
         if (plan.unlocksMultimodal) {
-            uint256 currentMulti = multimodalExpiration[recipient];
-            multimodalExpiration[recipient] = currentMulti > block.timestamp
-                ? currentMulti + plan.duration
-                : block.timestamp + plan.duration;
+            multimodalExpiration[recipient] = block.timestamp + plan.duration;
         }
 
         if (msg.value > plan.price) {
@@ -207,6 +207,15 @@ contract BirdlySubscription {
             historyExpiration[recipient],
             multimodalExpiration[recipient]
         );
+    }
+
+    function cancelSubscription() external {
+        if (historyExpiration[msg.sender] <= block.timestamp && multimodalExpiration[msg.sender] <= block.timestamp) {
+            revert NoActiveSubscription();
+        }
+        historyExpiration[msg.sender] = 0;
+        multimodalExpiration[msg.sender] = 0;
+        emit SubscriptionCancelled(msg.sender);
     }
 
     function grantSubscription(

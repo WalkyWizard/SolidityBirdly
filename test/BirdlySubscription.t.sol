@@ -24,6 +24,7 @@ contract BirdlySubscriptionTest is Test {
         uint256 multimodalExpiresAt
     );
 
+    event SubscriptionCancelled(address indexed user);
     event FundsWithdrawn(address indexed to, uint256 amount);
 
     function setUp() public {
@@ -95,17 +96,38 @@ contract BirdlySubscriptionTest is Test {
         assertTrue(subscription.hasFullAccess(user1));
     }
 
-    function testSubscriptionExtension() public {
+    function testCannotSubscribeWhileActive() public {
         vm.startPrank(user1);
         subscription.subscribe{value: 0.012 ether}(3);
-        uint256 initialExpiry = block.timestamp + 30 days;
 
-        vm.warp(block.timestamp + 10 days);
-        subscription.subscribe{value: 0.012 ether}(3);
+        vm.expectRevert(BirdlySubscription.SubscriptionAlreadyActive.selector);
+        subscription.subscribe{value: 0.005 ether}(1);
         vm.stopPrank();
+    }
 
-        assertEq(subscription.historyExpiration(user1), initialExpiry + 30 days);
-        assertEq(subscription.multimodalExpiration(user1), initialExpiry + 30 days);
+    function testCancelSubscriptionResetsAccess() public {
+        vm.startPrank(user1);
+        subscription.subscribe{value: 0.012 ether}(3);
+        assertTrue(subscription.hasHistoryAccess(user1));
+        assertTrue(subscription.hasMultimodalAccess(user1));
+
+        subscription.cancelSubscription();
+
+        assertFalse(subscription.hasHistoryAccess(user1));
+        assertFalse(subscription.hasMultimodalAccess(user1));
+        assertEq(subscription.historyExpiration(user1), 0);
+        assertEq(subscription.multimodalExpiration(user1), 0);
+
+        subscription.subscribe{value: 0.005 ether}(1);
+        assertTrue(subscription.hasHistoryAccess(user1));
+        assertFalse(subscription.hasMultimodalAccess(user1));
+        vm.stopPrank();
+    }
+
+    function testCancelSubscriptionWhenNoneActiveReverts() public {
+        vm.prank(user1);
+        vm.expectRevert(BirdlySubscription.NoActiveSubscription.selector);
+        subscription.cancelSubscription();
     }
 
     function testAccessExpiresAfterDuration() public {
